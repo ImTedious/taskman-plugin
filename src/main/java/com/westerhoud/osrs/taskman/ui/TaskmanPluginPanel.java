@@ -1,5 +1,6 @@
 package com.westerhoud.osrs.taskman.ui;
 
+import com.westerhoud.osrs.taskman.RequestCallback;
 import com.westerhoud.osrs.taskman.TaskmanPlugin;
 import com.westerhoud.osrs.taskman.domain.AccountProgress;
 import com.westerhoud.osrs.taskman.domain.Task;
@@ -17,7 +18,9 @@ import javax.swing.JButton;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
@@ -32,6 +35,7 @@ import net.runelite.client.util.LinkBrowser;
 public class TaskmanPluginPanel extends PluginPanel {
 
   private final TaskmanPlugin taskmanPlugin;
+  private final ClientThread clientThread;
   private final JPanel taskPanel;
   private final JPanel taskDataPanel;
   private final JPanel progressPanel;
@@ -49,8 +53,9 @@ public class TaskmanPluginPanel extends PluginPanel {
       new ColorJButton("FAQ", ColorScheme.DARKER_GRAY_COLOR);
   private final JPanel tryAgainPanel;
 
-  public TaskmanPluginPanel(final TaskmanPlugin taskmanPlugin) {
+  public TaskmanPluginPanel(final TaskmanPlugin taskmanPlugin, final ClientThread clientThread) {
     super();
+    this.clientThread = clientThread;
     this.taskmanPlugin = taskmanPlugin;
 
     setOpaque(false);
@@ -131,6 +136,8 @@ public class TaskmanPluginPanel extends PluginPanel {
   }
 
   private void showErrorMessage(final Exception e) {
+    log.error(e.getMessage(), e);
+
     tryAgainPanel.setVisible(true);
     errorPanel.setContent("Oops... Something went wrong", e.getMessage());
     errorPanel.setVisible(true);
@@ -140,76 +147,133 @@ public class TaskmanPluginPanel extends PluginPanel {
 
   private void getCurrentTaskAndUpdateContent() {
     try {
-      final Task currentTask = taskmanPlugin.getCurrentTask();
-      updateTaskPanelContent(currentTask);
-      errorPanel.setVisible(false);
+      taskmanPlugin.getCurrentTask(new RequestCallback<Task>() {
+        @Override
+        public void onSuccess(@NonNull final Task res) {
+          clientThread.invoke(() -> {
+            updateTaskPanelContent(res);
+            errorPanel.setVisible(false);
+          });
+        }
+
+        @Override
+        public void onFailure(@NonNull final Exception e) {
+          clientThread.invoke(() -> showErrorMessage(e));
+        }
+      });
     } catch (final Exception e) {
-      log.error(e.getMessage(), e);
       showErrorMessage(e);
     }
   }
 
   private void generateTaskAndUpdateContent() {
     try {
-      final Task newTask = taskmanPlugin.generateTask();
-      updateTaskPanelContent(newTask);
-      errorPanel.setVisible(false);
+      taskmanPlugin.generateTask(new RequestCallback<Task>() {
+        @Override
+        public void onSuccess(@NonNull final Task res) {
+          clientThread.invoke(() -> {
+            updateTaskPanelContent(res);
+            errorPanel.setVisible(false);
+          });
+        }
+
+        @Override
+        public void onFailure(@NonNull final Exception e) {
+          clientThread.invoke(() -> showErrorMessage(e));
+        }
+      });
     } catch (final Exception e) {
-      log.error(e.getMessage(), e);
       showErrorMessage(e);
     }
   }
 
   private void completeTaskAndUpdateContent() {
     try {
-      final Task newTask = taskmanPlugin.completeTask();
-      updateTaskPanelContent(newTask);
-      getProgressAndUpdateContent();
-      errorPanel.setVisible(false);
+      taskmanPlugin.completeTask(new RequestCallback<Task>() {
+        @Override
+        public void onSuccess(@NonNull final Task res) {
+          clientThread.invoke(() -> updateTaskPanelContent(res));
+          getProgressAndUpdateContent(new RequestCallback<AccountProgress>() {
+            @Override
+            public void onSuccess(@NonNull final AccountProgress _res) {
+              clientThread.invoke(() -> errorPanel.setVisible(false));
+            }
+
+            @Override
+            public void onFailure(@NonNull final Exception e) {
+              clientThread.invoke(() -> showErrorMessage(e));
+            }
+          });
+        }
+
+        @Override
+        public void onFailure(@NonNull final Exception e) {
+          clientThread.invoke(() -> showErrorMessage(e));
+        }
+      });
     } catch (final Exception e) {
-      log.error(e.getMessage(), e);
       showErrorMessage(e);
     }
   }
 
-  private void getProgressAndUpdateContent() {
+  private void getProgressAndUpdateContent(RequestCallback<AccountProgress> rc) {
     try {
-      final AccountProgress accountProgress = taskmanPlugin.progress();
-      progressPanel.removeAll();
-      progressPanel.add(progressLabel);
-      for (final Map.Entry<String, TierProgress> entry :
-          accountProgress.getProgressByTier().entrySet()) {
-        final String key = entry.getKey();
-        final TierProgress value = entry.getValue();
-        final ProgressBar progressBar = new ProgressBar();
-        progressBar.setMaximumValue(value.getMaxValue());
-        progressBar.setValue(value.getValue());
-        progressBar.setRightLabel(String.valueOf(value.getMaxValue()));
-        progressBar.setLeftLabel(String.valueOf(value.getValue()));
-        final int percentage = progressBar.getPercentage();
-        progressBar.setCenterLabel(String.format("%s %d%%", key, percentage));
-        progressBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        if (percentage == 0) {
-          progressBar.setForeground(Color.RED);
-        } else if (percentage < 25) {
-          progressBar.setForeground(Color.decode("#ea6600"));
-        } else if (percentage < 50) {
-          progressBar.setForeground(Color.decode("#ffb600"));
-        } else if (percentage < 75) {
-          progressBar.setForeground(Color.decode("#ffe500"));
-        } else if (percentage < 100) {
-          progressBar.setForeground(Color.decode("#aeff00"));
-        } else {
-          progressBar.setForeground(Color.GREEN);
+      taskmanPlugin.progress(
+        new RequestCallback<AccountProgress>() {
+          @Override
+          public void onSuccess(final @NonNull AccountProgress res) {
+            clientThread.invoke(() -> {
+              updateProgressContent(res);
+              rc.onSuccess(res);
+            });
+          }
+
+          @Override
+          public void onFailure(final @NonNull Exception e) {
+            clientThread.invoke(() -> {
+              showErrorMessage(e);
+              rc.onFailure(e);
+            });
+          }
         }
-        progressPanel.add(progressBar);
-      }
-      if (!accountProgress.getProgressByTier().isEmpty()) {
-        progressPanel.setVisible(true);
-      }
-    } catch (final Exception e) {
-      log.error(e.getMessage(), e);
+      );
+    } catch (Exception e) {
       showErrorMessage(e);
+    }
+  }
+
+  private void updateProgressContent(final AccountProgress accountProgress) {
+    progressPanel.removeAll();
+    progressPanel.add(progressLabel);
+    for (final Map.Entry<String, TierProgress> entry :
+        accountProgress.getProgressByTier().entrySet()) {
+      final String key = entry.getKey();
+      final TierProgress value = entry.getValue();
+      final ProgressBar progressBar = new ProgressBar();
+      progressBar.setMaximumValue(value.getMaxValue());
+      progressBar.setValue(value.getValue());
+      progressBar.setRightLabel(String.valueOf(value.getMaxValue()));
+      progressBar.setLeftLabel(String.valueOf(value.getValue()));
+      final int percentage = progressBar.getPercentage();
+      progressBar.setCenterLabel(String.format("%s %d%%", key, percentage));
+      progressBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+      if (percentage == 0) {
+        progressBar.setForeground(Color.RED);
+      } else if (percentage < 25) {
+        progressBar.setForeground(Color.decode("#ea6600"));
+      } else if (percentage < 50) {
+        progressBar.setForeground(Color.decode("#ffb600"));
+      } else if (percentage < 75) {
+        progressBar.setForeground(Color.decode("#ffe500"));
+      } else if (percentage < 100) {
+        progressBar.setForeground(Color.decode("#aeff00"));
+      } else {
+        progressBar.setForeground(Color.GREEN);
+      }
+      progressPanel.add(progressBar);
+    }
+    if (!accountProgress.getProgressByTier().isEmpty()) {
+      progressPanel.setVisible(true);
     }
   }
 
@@ -223,7 +287,7 @@ public class TaskmanPluginPanel extends PluginPanel {
     taskPanel.setVisible(false);
     progressPanel.setVisible(false);
     getCurrentTaskAndUpdateContent();
-    getProgressAndUpdateContent();
+    getProgressAndUpdateContent(res -> {});
   }
 
   public void onLogout() {

@@ -13,6 +13,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -36,6 +37,7 @@ import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
+import okhttp3.Callback;
 import okhttp3.OkHttpClient;
 
 @Slf4j
@@ -67,7 +69,7 @@ public class TaskmanPlugin extends Plugin {
     taskService = new TaskService(okHttpClient, gson);
     chatCommandManager.registerCommandAsync(TASKMAN_CHAT_COMMAND, this::getTaskmanCommandData);
 
-    sidePanel = new TaskmanPluginPanel(this);
+    sidePanel = new TaskmanPluginPanel(this, clientThread);
     navigationButton =
         NavigationButton.builder()
             .tooltip("Taskman")
@@ -87,26 +89,53 @@ public class TaskmanPlugin extends Plugin {
     chatCommandManager.unregisterCommand(TASKMAN_CHAT_COMMAND);
   }
 
-  public Task getCurrentTask() throws Exception {
-    final Task task = taskService.getCurrentTask(getCredentials(), getRsn());
-    currentTaskOverlay.setTask(task);
-    return task;
+  public void getCurrentTask(RequestCallback<Task> rc) throws IllegalArgumentException {
+    taskService.getCurrentTask(getCredentials(), getRsn(), new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        currentTaskOverlay.setTask(res);
+        rc.onSuccess(res);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    });
   }
 
-  public Task generateTask() throws Exception {
-    final Task task = taskService.generateTask(getCredentials(), getRsn());
-    currentTaskOverlay.setTask(task);
-    return task;
+  public void generateTask(RequestCallback<Task> rc) throws IllegalArgumentException {
+    taskService.generateTask(getCredentials(), getRsn(), new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        currentTaskOverlay.setTask(res);
+        rc.onSuccess(res);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    });
   }
 
-  public Task completeTask() throws Exception {
-    final Task task = taskService.completeTask(getCredentials(), getRsn());
-    currentTaskOverlay.setTask(task);
-    return task;
+  public void completeTask(RequestCallback<Task> rc) throws IllegalArgumentException {
+    taskService.completeTask(getCredentials(), getRsn(), new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        currentTaskOverlay.setTask(res);
+        rc.onSuccess(res);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    });
   }
 
-  public AccountProgress progress() throws Exception {
-    return taskService.getAccountProgress(getCredentials(), getRsn());
+  public void progress(RequestCallback<AccountProgress> rc) throws IllegalArgumentException {
+    taskService.getAccountProgress(getCredentials(), getRsn(), rc);
   }
 
   private void getTaskmanCommandData(final ChatMessage chatMessage, final String message) {
