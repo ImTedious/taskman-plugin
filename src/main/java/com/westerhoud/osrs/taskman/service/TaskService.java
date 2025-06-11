@@ -1,6 +1,7 @@
 package com.westerhoud.osrs.taskman.service;
 
 import com.google.gson.Gson;
+import com.westerhoud.osrs.taskman.RequestCallback;
 import com.westerhoud.osrs.taskman.domain.AccountCredentials;
 import com.westerhoud.osrs.taskman.domain.AccountProgress;
 import com.westerhoud.osrs.taskman.domain.ErrorResponse;
@@ -8,7 +9,10 @@ import com.westerhoud.osrs.taskman.domain.Task;
 import com.westerhoud.osrs.taskman.domain.TaskmanCommandData;
 import java.io.IOException;
 import javax.imageio.ImageIO;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -44,12 +48,9 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
   }
 
   @Override
-  public Task getCurrentTask(final AccountCredentials credentials, final String rsn)
-      throws IOException {
-    if (!credentials.isValid()) {
-      throw new IllegalArgumentException(
-          "Please configure your credentials in the plugin configurations");
-    }
+  public void getCurrentTask(final AccountCredentials credentials, final String rsn, RequestCallback<Task> rc)
+      throws IllegalArgumentException {
+    checkCredentials(credentials);
 
     final Request request =
         new Request.Builder()
@@ -61,12 +62,21 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
             .get()
             .build();
 
-    return executeRequest(request);
+    executeRequestAsync(request, new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        setImage(res, rc);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    }, Task.class);
   }
 
   @Override
-  public Task generateTask(final AccountCredentials credentials, final String rsn)
-      throws IOException {
+  public void generateTask(final AccountCredentials credentials, final String rsn, RequestCallback<Task> rc) {
     final Request request =
         new Request.Builder()
             .url(generateUrl)
@@ -75,12 +85,23 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
             .addHeader(TASKMAN_RSN_HEADER, rsn)
             .post(getRequestBody(credentials))
             .build();
-    return executeRequest(request);
+
+    executeRequestAsync(request, new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        setImage(res, rc);
+        rc.onSuccess(res);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    }, Task.class);
   }
 
   @Override
-  public Task completeTask(final AccountCredentials credentials, final String rsn)
-      throws IOException {
+  public void completeTask(final AccountCredentials credentials, final String rsn, RequestCallback<Task> rc) {
     final Request request =
         new Request.Builder()
             .url(completeUrl)
@@ -89,16 +110,25 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
             .addHeader(TASKMAN_RSN_HEADER, rsn)
             .post(getRequestBody(credentials))
             .build();
-    return executeRequest(request);
+
+    executeRequestAsync(request, new RequestCallback<Task>() {
+      @Override
+      public void onSuccess(@NonNull final Task res) {
+        setImage(res, rc);
+        rc.onSuccess(res);
+      }
+
+      @Override
+      public void onFailure(@NonNull final Exception e) {
+        rc.onFailure(e);
+      }
+    }, Task.class);
   }
 
   @Override
-  public AccountProgress getAccountProgress(final AccountCredentials credentials, final String rsn)
-      throws IOException {
-    if (!credentials.isValid()) {
-      throw new IllegalArgumentException(
-          "Please set your username / spreadsheet key in the plugin configurations");
-    }
+  public void getAccountProgress(final AccountCredentials credentials, final String rsn,
+      final RequestCallback<AccountProgress> rc) throws IllegalArgumentException {
+    checkCredentials(credentials);
 
     final Request request =
         new Request.Builder()
@@ -110,17 +140,10 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
             .get()
             .build();
 
-    final Response response = client.newCall(request).execute();
-
-    if (response.code() == 200) {
-      return gson.fromJson(response.body().string(), AccountProgress.class);
-    }
-
-    final ErrorResponse error = mapResponseToErrorResponse(response);
-    throw new IllegalArgumentException(error.getMessage());
+    executeRequestAsync(request, rc, AccountProgress.class);
   }
 
-  @Override
+@Override
   public TaskmanCommandData getChatCommandData(final String rsn) throws IOException {
     final Request request = new Builder().url(String.format(commandUrl, rsn)).get().build();
 
@@ -133,25 +156,28 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
     }
   }
 
+  private <T> void executeRequestAsync(final Request request, final RequestCallback<T> rc, Class<T> clazz) {
+    client.newCall(request).enqueue(new Callback() {
+      @Override
+      public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+        if (response.code() == 200 && response.body() != null) {
+          rc.onSuccess(gson.fromJson(response.body().string(), clazz));
+          return;
+        }
+
+        final ErrorResponse error = mapResponseToErrorResponse(response);
+        rc.onFailure(new IllegalArgumentException(error.getMessage()));
+      }
+
+      @Override
+      public void onFailure(@NonNull Call call, @NonNull IOException e) {
+        rc.onFailure(e);
+      }
+    });
+  }
+
   private RequestBody getRequestBody(final AccountCredentials credentials) {
     return RequestBody.create(MediaType.parse("application/json"), gson.toJson(credentials));
-  }
-
-  private Task executeRequest(final Request request) throws IOException {
-    final Response response = client.newCall(request).execute();
-
-    if (response.code() == 200) {
-      final Task task = mapResponseToTask(response);
-      setImage(task);
-      return task;
-    }
-
-    final ErrorResponse error = mapResponseToErrorResponse(response);
-    throw new IllegalArgumentException(error.getMessage());
-  }
-
-  private Task mapResponseToTask(final Response response) throws IOException {
-    return gson.fromJson(response.body().string(), Task.class);
   }
 
   private ErrorResponse mapResponseToErrorResponse(final Response response) throws IOException {
@@ -160,19 +186,35 @@ public class TaskService implements com.westerhoud.osrs.taskman.api.TaskService 
     return gson.fromJson(responseString, ErrorResponse.class);
   }
 
-  private void setImage(final Task task) {
+  private static void checkCredentials(final AccountCredentials credentials) {
+    if (!credentials.isValid()) {
+      throw new IllegalArgumentException("Please configure your credentials in the plugin configurations");
+    }
+  }
+
+  private void setImage(final Task task, final RequestCallback<Task> rc) {
     final Request request = new Builder().url(task.getImageUrl()).get().build();
 
-    try (final Response response = client.newCall(request).execute()) {
-      final ResponseBody responseBody = response.body();
+    client.newCall(request).enqueue(new Callback() {
+      @Override
+      public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+        final ResponseBody responseBody = response.body();
 
-      if (responseBody == null) {
-        log.info(task.getImageUrl());
-        return;
+        if (responseBody == null) {
+          log.info(task.getImageUrl());
+          return;
+        }
+
+        task.setImage(ImageIO.read(responseBody.byteStream()));
+        rc.onSuccess(task);
       }
-      task.setImage(ImageIO.read(responseBody.byteStream()));
-    } catch (final IOException e) {
-      log.error(e.getMessage(), e);
-    }
+
+      @Override
+      public void onFailure(@NonNull Call call, @NonNull IOException e) {
+        log.error(e.getMessage(), e);
+        // we kinda don't care if the image doesn't load
+        rc.onSuccess(task);
+      }
+    });
   }
 }

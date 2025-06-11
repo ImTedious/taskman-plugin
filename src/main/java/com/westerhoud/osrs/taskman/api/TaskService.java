@@ -1,5 +1,6 @@
 package com.westerhoud.osrs.taskman.api;
 
+import com.westerhoud.osrs.taskman.RequestCallback;
 import com.westerhoud.osrs.taskman.domain.AccountCredentials;
 import com.westerhoud.osrs.taskman.domain.AccountProgress;
 import com.westerhoud.osrs.taskman.domain.Task;
@@ -8,14 +9,17 @@ import java.io.IOException;
 
 public interface TaskService {
 
-  Task getCurrentTask(final AccountCredentials credentials, final String name) throws IOException;
+  void getCurrentTask(final AccountCredentials credentials, final String name, RequestCallback<Task> rc)
+      throws IllegalArgumentException;
 
-  Task generateTask(final AccountCredentials credentials, final String name) throws IOException;
+  void generateTask(final AccountCredentials credentials, final String name, RequestCallback<Task> rc)
+      throws IllegalArgumentException;
 
-  Task completeTask(final AccountCredentials credentials, final String name) throws IOException;
+  void completeTask(final AccountCredentials credentials, final String name, RequestCallback<Task> rc)
+      throws IllegalArgumentException;
 
-  AccountProgress getAccountProgress(final AccountCredentials credentials, final String name)
-      throws IOException;
+  void getAccountProgress(AccountCredentials credentials, String rsn, RequestCallback<AccountProgress> rc)
+      throws IllegalArgumentException;
 
-  TaskmanCommandData getChatCommandData(String rsn) throws IOException;
+  TaskmanCommandData getChatCommandData(final String rsn) throws IOException;
 }
